@@ -1,13 +1,13 @@
 Summary: Xen Orchestra Lite
 Name:    xo-lite
 Version: 0.15.0
-Release: 1%{?dist}
+Release: 1ws%{?dist}
 License: AGPL3-only
-URL:     https://github.com/vatesfr/xen-orchestra
+URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/vatesfr/xen-orchestra/releases/download/%{name}-v%{version}/%{name}-%{version}.tar.gz
+Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{name}_hydron/%{name}_hydron.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen

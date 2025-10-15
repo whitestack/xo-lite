@@ -29,7 +29,6 @@ rm %{buildroot}/opt/xensource/www/LICENSE %{buildroot}/opt/xensource/www/CHANGEL
 /opt/xensource/www/index.html
 /opt/xensource/www/favicon.svg
 /opt/xensource/www/manifest.webmanifest
-/opt/xensource/www/xolite.html
 /opt/xensource/www/build.json
 %doc CHANGELOG.md
 

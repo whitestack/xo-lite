@@ -1,0 +1,29 @@
+name: Build XO Lite
+
+on:
+  push:
+    branches: [ "release/hydron" ]
+    tags: [ "hydron-*" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Prepare environment
+        run: |
+          source env.sh
+          VERSION=${GITHUB_REF##*/}
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.VERSION }}
+          tag_name: ${{ env.VERSION }}
+          body: Whitestack XO Lite RPM
+          draft: false
+          prerelease: false
+          overwrite_files: true

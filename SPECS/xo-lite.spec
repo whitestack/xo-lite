@@ -1,3 +1,5 @@
+%global ws_release %{WS_RELEASE:-hydron}
+
 Summary: Xen Orchestra Lite
 Name:    xo-lite
 Version: 0.15.0
@@ -7,7 +9,7 @@ URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{name}_hydron/%{name}_hydron.tar.gz
+Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{ws_release}/%{name}_%{ws_release}.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen

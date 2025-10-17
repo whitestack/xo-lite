@@ -1,13 +1,17 @@
+%global ws_release %{getenv:WS_RELEASE}
+%undefine _disable_source_fetch
+
 Summary: Xen Orchestra Lite
 Name:    xo-lite
+Epoch: 1
 Version: 0.15.0
 Release: 1%{?dist}
 License: AGPL3-only
-URL:     https://github.com/vatesfr/xen-orchestra
+URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/vatesfr/xen-orchestra/releases/download/%{name}-v%{version}/%{name}-%{version}.tar.gz
+Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{ws_release}/%{name}_%{ws_release}.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen
@@ -15,13 +19,13 @@ Orchestra Appliance for single-host administration, running directly from your
 browser without having to deploy anything.
 
 %prep
-%autosetup -p1
+%autosetup -p1 -n xo-lite_hydron
 
 %install
 install -d -m 755 %{buildroot}/opt/xensource/www
 cp -a * %{buildroot}/opt/xensource/www
 # Remove unnecessary files.
-rm %{buildroot}/opt/xensource/www/LICENSE %{buildroot}/opt/xensource/www/CHANGELOG.md
+rm %{buildroot}/opt/xensource/www/LICENSE
 
 %files
 %license LICENSE
@@ -29,9 +33,8 @@ rm %{buildroot}/opt/xensource/www/LICENSE %{buildroot}/opt/xensource/www/CHANGEL
 /opt/xensource/www/index.html
 /opt/xensource/www/favicon.svg
 /opt/xensource/www/manifest.webmanifest
-/opt/xensource/www/xolite.html
 /opt/xensource/www/build.json
-%doc CHANGELOG.md
+
 
 %changelog
 * Tue Sep 30 2025 Gael Duperrey <gduperrey@vates.tech> - 0.15.0-1

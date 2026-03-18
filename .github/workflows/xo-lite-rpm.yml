@@ -17,15 +17,11 @@ jobs:
           TAG=${GITHUB_REF##*/}
           echo "TAG=${TAG}" >> $GITHUB_ENV
 
-      - name: Delete old release
-        if: startsWith(github.ref, 'refs/heads/release/')
-        run: gh release delete "${TAG}" -y || true
+      - name: Delete latest release and tag
+        if: startsWith(github.ref, 'refs/heads/')
+        run: gh release delete ${TAG} --cleanup-tag
         env:
           GH_TOKEN: ${{ github.token }}
-
-      - name: Delete old tag
-        if: startsWith(github.ref, 'refs/heads/release/')
-        run: git push origin ":refs/tags/${TAG}" || true
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

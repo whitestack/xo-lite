@@ -18,7 +18,7 @@ jobs:
           echo "TAG=${TAG}" >> $GITHUB_ENV
 
       - name: Delete latest release and tag
-        if: startsWith(github.ref, 'refs/heads/')
+        if: startsWith(github.ref, 'refs/heads/release')
         run: gh release delete ${TAG} --cleanup-tag
         env:
           GH_TOKEN: ${{ github.token }}

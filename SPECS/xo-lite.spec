@@ -11,7 +11,7 @@ URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{ws_release}/%{name}_%{ws_release}.tar.gz
+Source0: https://github.com/whitestack/xen-orchestra/releases/download/PRNEPHORA-42_Change_To_Private_Nomenclature/xo-lite_PRNEPHORA-42_Change_To_Private_Nomenclature.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen

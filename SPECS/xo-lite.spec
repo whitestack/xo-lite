@@ -19,7 +19,7 @@ Orchestra Appliance for single-host administration, running directly from your
 browser without having to deploy anything.
 
 %prep
-%autosetup -p1 -n xo-lite_hydron
+%autosetup -p1 -n xo-lite_PRNEPHORA-42_Change_To_Private_Nomenclature
 
 %install
 install -d -m 755 %{buildroot}/opt/xensource/www

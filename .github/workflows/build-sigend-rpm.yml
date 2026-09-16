@@ -10,7 +10,7 @@ on:
         default: false
 
   push:
-    branches: [ "release/hydron" ]
+    branches: [ "release/hydron", "dev/hydron/PRNEPHORA-62_Add_Action_for_RPM_Build_and_Signature" ]
     tags: [ "hydron-*" ]
 
 permissions:

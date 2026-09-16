@@ -37,7 +37,7 @@ jobs:
           repository: whitestack/xcp-ng-build-env
           ref: ${{ env.BUILD_ENV_COMMIT }}
           path: _xcp-ng-build-env
-          # token: ${{ secrets.WHITESTACK_REPOS_READ_TOKEN }}
+          token: ${{ secrets.WHITESTACK_REPOS_READ_TOKEN }}
 
       - name: Authenticate to the WhiteStack container registry
         shell: bash

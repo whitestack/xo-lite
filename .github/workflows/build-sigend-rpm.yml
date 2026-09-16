@@ -1,0 +1,417 @@
+name: Build, sign and publish XO Lite RPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_google:
+        description: Upload the signed RPM to Google Artifact Registry
+        required: true
+        type: boolean
+        default: false
+
+  push:
+    branches: [ "release/hydron" ]
+    tags: [ "hydron-*" ]
+
+permissions:
+  contents: read
+
+env:
+  BASE_BUILDER_REF: gcr.io/whitestack-private/nephora/xcp-ng-build-env:hydron
+  BUILDER_REF: gcr.io/whitestack-private/nephora/xcp-ng-build-env:hydron-poc-fixed
+  BUILD_ENV_COMMIT: d1cf1092c3b114b572ceb707b6a00f25416ff42b
+  XO_RELEASE: hydron
+
+jobs:
+  build-sign-publish:
+    name: Build and sign xo-lite RPM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out xo-lite
+        uses: actions/checkout@v5
+
+      - name: Check out pinned xcp-ng-build-env
+        uses: actions/checkout@v5
+        with:
+          repository: whitestack/xcp-ng-build-env
+          ref: ${{ env.BUILD_ENV_COMMIT }}
+          path: _xcp-ng-build-env
+          token: ${{ secrets.WHITESTACK_REPOS_READ_TOKEN }}
+
+      - name: Authenticate to the WhiteStack container registry
+        shell: bash
+        env:
+          GCP_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+
+          test -n "${GCP_SA}"
+
+          GCP_KEY_FILE="${RUNNER_TEMP}/gcp-service-account.json"
+
+          printf '%s' "${GCP_SA}" \
+              > "${GCP_KEY_FILE}"
+
+          chmod 0600 \
+              "${GCP_KEY_FILE}"
+
+          GCLOUD_PROJECT="$(
+              jq -r '.project_id' \
+                  "${GCP_KEY_FILE}"
+          )"
+
+          test -n "${GCLOUD_PROJECT}"
+          test "${GCLOUD_PROJECT}" != 'null'
+
+          gcloud auth activate-service-account \
+              --key-file="${GCP_KEY_FILE}" \
+              --project="${GCLOUD_PROJECT}"
+
+          gcloud auth configure-docker \
+              -q \
+              gcr.io,us-central1-docker.pkg.dev
+
+          docker pull \
+              "${BASE_BUILDER_REF}"
+
+          printf 'GCLOUD_PROJECT=%s\n' "${GCLOUD_PROJECT}" \
+              >> "${GITHUB_ENV}"
+
+          rm -f \
+              "${GCP_KEY_FILE}"
+
+      - name: Build corrected RPM builder image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker build \
+              --pull=false \
+              --file .ci/Dockerfile.hydron-rpm \
+              --tag "${BUILDER_REF}" \
+              .ci
+
+          docker run --rm \
+              --entrypoint /bin/bash \
+              "${BUILDER_REF}" \
+              -lc '
+                  set -e
+
+                  grep "^baseurl=" \
+                      /etc/yum.repos.d/CentOS-Vault-7.5.repo
+
+                  command -v rpmsign
+              '
+
+      - name: Prepare disposable RPM work tree
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BUILD_ROOT="${RUNNER_TEMP}/xo-lite-rpm-${GITHUB_RUN_ID}"
+          RPM_WORK="${BUILD_ROOT}/rpmbuild"
+          RPM_OUTPUT="${BUILD_ROOT}/output"
+          SIGNING_DIR="${BUILD_ROOT}/signing"
+          DIST_DIR="${GITHUB_WORKSPACE}/dist"
+
+          mkdir -p \
+              "${RPM_WORK}" \
+              "${RPM_OUTPUT}" \
+              "${SIGNING_DIR}/gnupg" \
+              "${DIST_DIR}"
+
+          git archive "${GITHUB_SHA}" |
+              tar -x -C "${RPM_WORK}"
+
+          mkdir -p \
+              "${RPM_WORK}/BUILD" \
+              "${RPM_WORK}/BUILDROOT" \
+              "${RPM_WORK}/RPMS" \
+              "${RPM_WORK}/SOURCES" \
+              "${RPM_WORK}/SRPMS"
+
+          RPM_RELEASE="100.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+
+          sed -i -E \
+              "s/^[[:space:]]*Release:.*/Release: ${RPM_RELEASE}%{?dist}/" \
+              "${RPM_WORK}/SPECS/xo-lite.spec"
+
+          grep -nE \
+              '^(Epoch|Name|Version|Release|Source)' \
+              "${RPM_WORK}/SPECS/xo-lite.spec"
+
+          {
+              printf 'BUILD_ROOT=%s\n' "${BUILD_ROOT}"
+              printf 'RPM_WORK=%s\n' "${RPM_WORK}"
+              printf 'RPM_OUTPUT=%s\n' "${RPM_OUTPUT}"
+              printf 'SIGNING_DIR=%s\n' "${SIGNING_DIR}"
+              printf 'DIST_DIR=%s\n' "${DIST_DIR}"
+              printf 'RPM_RELEASE=%s\n' "${RPM_RELEASE}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Correct bind-mount ownership
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker run --rm \
+              --user root \
+              -v "${RPM_WORK}:/mounted-work" \
+              -v "${RPM_OUTPUT}:/mounted-output" \
+              "${BUILDER_REF}" \
+              bash --noprofile --norc -c '
+                  set -e
+
+                  BUILDER_UID="$(id -u builder)"
+                  BUILDER_GID="$(id -g builder)"
+
+                  chown -R \
+                      "${BUILDER_UID}:${BUILDER_GID}" \
+                      /mounted-work \
+                      /mounted-output
+
+                  chmod -R \
+                      u+rwX,go+rX \
+                      /mounted-work \
+                      /mounted-output
+              '
+
+      - name: Build xo-lite RPM
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          chmod 0755 \
+              _xcp-ng-build-env/run.py
+
+          _xcp-ng-build-env/run.py \
+              --rm \
+              --fail-on-error \
+              --name "xo_lite_${GITHUB_RUN_ID}" \
+              --env "WS_RELEASE=${XO_RELEASE}" \
+              --branch 'hydron-poc-fixed' \
+              --disablerepo 'C7.5.1804-*' \
+              --build-local "${RPM_WORK}" \
+              --output-dir "${RPM_OUTPUT}"
+
+          mapfile -t BUILT_RPMS < <(
+              find "${RPM_OUTPUT}/RPMS" \
+                  -type f \
+                  -name 'xo-lite-*.rpm'
+          )
+
+          if [ "${#BUILT_RPMS[@]}" -ne 1 ]; then
+              echo "Expected exactly one xo-lite RPM." >&2
+              printf '%s\n' "${BUILT_RPMS[@]}" >&2
+              exit 1
+          fi
+
+          printf 'Built RPM: %s\n' "${BUILT_RPMS[0]}"
+
+      - name: Import RPM signing key
+        shell: bash
+        env:
+          RPM_GPG_PRIVATE_KEY_B64: ${{ secrets.RPM_GPG_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+
+          test -n "${RPM_GPG_PRIVATE_KEY_B64}"
+
+          printf '%s' "${RPM_GPG_PRIVATE_KEY_B64}" |
+              base64 -d \
+              > "${SIGNING_DIR}/private-key.asc"
+
+          chmod 0600 \
+              "${SIGNING_DIR}/private-key.asc"
+
+          chmod 0700 \
+              "${SIGNING_DIR}/gnupg"
+
+      - name: Sign and verify RPM
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker run --rm \
+              --user root \
+              -v "${SIGNING_DIR}:/signing" \
+              -v "${RPM_OUTPUT}:/output" \
+              "${BUILDER_REF}" \
+              bash --noprofile --norc -s <<'IN_SIGNER'
+          set -euo pipefail
+
+          chmod 0700 \
+              /signing/gnupg
+
+          gpg1 \
+              --homedir /signing/gnupg \
+              --batch \
+              --import /signing/private-key.asc
+
+          KEY_FPR="$(
+              gpg1 \
+                  --homedir /signing/gnupg \
+                  --with-colons \
+                  --fingerprint \
+                  --list-secret-keys |
+              awk -F: '$1 == "fpr" { print $10; exit }'
+          )"
+
+          test -n "${KEY_FPR}"
+
+          printf '%s\n' "${KEY_FPR}" \
+              > /signing/key-fingerprint
+
+          gpg1 \
+              --homedir /signing/gnupg \
+              --armor \
+              --export "${KEY_FPR}" \
+              > /signing/RPM-GPG-KEY-xo-lite
+
+          cat > /root/.rpmmacros <<EOF
+          %_signature gpg
+          %_gpg_name ${KEY_FPR}
+          %_gpg_path /signing/gnupg
+          %_gpgbin /usr/bin/gpg1
+          %__gpg /usr/bin/gpg1
+          %_gpg_digest_algo sha256
+          EOF
+
+          while IFS= read -r -d '' RPM_FILE; do
+              printf 'Signing %s\n' "${RPM_FILE}"
+              rpmsign --addsign "${RPM_FILE}"
+          done < <(
+              find /output/RPMS \
+                  -type f \
+                  -name 'xo-lite-*.rpm' \
+                  -print0
+          )
+
+          rpm --import \
+              /signing/RPM-GPG-KEY-xo-lite
+
+          while IFS= read -r -d '' RPM_FILE; do
+              printf 'Verifying %s\n' "${RPM_FILE}"
+              rpmkeys --checksig --verbose "${RPM_FILE}"
+          done < <(
+              find /output/RPMS \
+                  -type f \
+                  -name 'xo-lite-*.rpm' \
+                  -print0
+          )
+
+          chmod 0644 \
+              /signing/key-fingerprint \
+              /signing/RPM-GPG-KEY-xo-lite
+
+          chmod -R a+rX \
+              /output
+          IN_SIGNER
+
+          rm -f \
+              "${SIGNING_DIR}/private-key.asc"
+
+      - name: Prepare publication bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t RPMS < <(
+              find "${RPM_OUTPUT}/RPMS" \
+                  -type f \
+                  -name 'xo-lite-*.rpm'
+          )
+
+          if [ "${#RPMS[@]}" -ne 1 ]; then
+              echo "Expected exactly one signed RPM." >&2
+              exit 1
+          fi
+
+          RPM_FILE="${RPMS[0]}"
+          RPM_BASENAME="$(basename "${RPM_FILE}")"
+
+          install -m 0644 \
+              "${RPM_FILE}" \
+              "${DIST_DIR}/${RPM_BASENAME}"
+
+          install -m 0644 \
+              "${SIGNING_DIR}/RPM-GPG-KEY-xo-lite" \
+              "${DIST_DIR}/RPM-GPG-KEY-xo-lite"
+
+          (
+              cd "${DIST_DIR}"
+
+              sha256sum "${RPM_BASENAME}" \
+                  > SHA256SUMS
+
+              {
+                  printf 'RPM_FILE=%s\n' "${RPM_BASENAME}"
+                  printf 'RPM_RELEASE=%s\n' "${RPM_RELEASE}"
+                  printf 'GITHUB_SHA=%s\n' "${GITHUB_SHA}"
+                  printf 'GITHUB_RUN_ID=%s\n' "${GITHUB_RUN_ID}"
+                  printf 'GITHUB_RUN_NUMBER=%s\n' \
+                      "${GITHUB_RUN_NUMBER}"
+                  printf 'GITHUB_RUN_ATTEMPT=%s\n' \
+                      "${GITHUB_RUN_ATTEMPT}"
+                  printf 'GPG_FINGERPRINT=%s\n' \
+                      "$(
+                          tr -d '[:space:]' \
+                              < "${SIGNING_DIR}/key-fingerprint"
+                      )"
+              } > manifest.env
+          )
+
+          find "${DIST_DIR}" \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' \
+              | sort
+
+      - name: Save signed RPM as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xo-lite-rpm
+          path: |
+            dist/*.rpm
+            dist/RPM-GPG-KEY-xo-lite
+            dist/SHA256SUMS
+            dist/manifest.env
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload signed RPM to Google Artifact Registry
+        if: >-
+          ${{
+            (github.event_name == 'workflow_dispatch' &&
+             inputs.publish_to_google == true) ||
+            startsWith(github.ref, 'refs/tags/rpm-hydron-')
+          }}
+        shell: bash
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_LOCATION: ${{ vars.GCP_LOCATION }}
+          GAR_YUM_REPOSITORY: ${{ vars.GAR_YUM_REPOSITORY }}
+        run: |
+          set -euo pipefail
+
+          : "${GCP_LOCATION:?GCP_LOCATION is required}"
+          : "${GAR_YUM_REPOSITORY:?GAR_YUM_REPOSITORY is required}"
+
+          EFFECTIVE_PROJECT="${GCP_PROJECT_ID:-${GCLOUD_PROJECT}}"
+
+          mapfile -t RPMS < <(
+              find dist \
+                  -maxdepth 1 \
+                  -type f \
+                  -name 'xo-lite-*.rpm'
+          )
+
+          test "${#RPMS[@]}" -eq 1
+
+          gcloud artifacts yum upload \
+              "${GAR_YUM_REPOSITORY}" \
+              --project="${EFFECTIVE_PROJECT}" \
+              --location="${GCP_LOCATION}" \
+              --source="${RPMS[0]}" \
+              --quiet

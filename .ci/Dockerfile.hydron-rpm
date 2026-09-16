@@ -1,0 +1,16 @@
+FROM gcr.io/whitestack-private/nephora/xcp-ng-build-env:hydron
+
+USER root
+
+RUN test -f /etc/yum.repos.d/CentOS-Vault-7.5.repo \
+    && sed -i \
+        's|http://vault.centos.org|https://archive.kernel.org/centos-vault|g' \
+        /etc/yum.repos.d/CentOS-Vault-7.5.repo \
+    && yum clean all \
+    && yum -y \
+        --disablerepo='*' \
+        --enablerepo='C7.5.1804-base' \
+        install rpm-sign \
+    && test -x /usr/bin/rpmsign \
+    && yum clean all \
+    && rm -rf /var/cache/yum

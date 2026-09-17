@@ -10,8 +10,12 @@ on:
         default: false
 
   push:
-    branches: [ "release/hydron", "dev/hydron/PRNEPHORA-62_Add_Action_for_RPM_Build_and_Signature" ]
-    tags: [ "hydron-*" ]
+    branches:
+      - release/hydron
+      # Temporary trigger while this workflow is being tested.
+      - dev/hydron/PRNEPHORA-62_Add_Action_for_RPM_Build_and_Signature
+    tags:
+      - hydron-*
 
 permissions:
   contents: read
@@ -30,6 +34,8 @@ jobs:
     steps:
       - name: Check out xo-lite
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Check out pinned xcp-ng-build-env
         uses: actions/checkout@v5
@@ -37,7 +43,7 @@ jobs:
           repository: whitestack/xcp-ng-build-env
           ref: ${{ env.BUILD_ENV_COMMIT }}
           path: _xcp-ng-build-env
-          token: ${{ secrets.WHITESTACK_REPOS_READ_TOKEN }}
+          persist-credentials: false
 
       - name: Authenticate to the WhiteStack container registry
         shell: bash
@@ -46,40 +52,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -n "${GCP_SA}"
+          : "${GCP_SA:?GCP_SERVICE_ACCOUNT is required}"
 
           GCP_KEY_FILE="${RUNNER_TEMP}/gcp-service-account.json"
+          trap 'rm -f "${GCP_KEY_FILE}"' EXIT
 
-          printf '%s' "${GCP_SA}" \
-              > "${GCP_KEY_FILE}"
+          printf '%s' "${GCP_SA}" > "${GCP_KEY_FILE}"
+          chmod 0600 "${GCP_KEY_FILE}"
 
-          chmod 0600 \
-              "${GCP_KEY_FILE}"
-
-          GCLOUD_PROJECT="$(
-              jq -r '.project_id' \
-                  "${GCP_KEY_FILE}"
+          SERVICE_ACCOUNT_PROJECT="$(
+              jq -er '.project_id' "${GCP_KEY_FILE}"
           )"
-
-          test -n "${GCLOUD_PROJECT}"
-          test "${GCLOUD_PROJECT}" != 'null'
 
           gcloud auth activate-service-account \
               --key-file="${GCP_KEY_FILE}" \
-              --project="${GCLOUD_PROJECT}"
+              --project="${SERVICE_ACCOUNT_PROJECT}"
 
           gcloud auth configure-docker \
-              -q \
+              --quiet \
               gcr.io,us-central1-docker.pkg.dev
 
-          docker pull \
-              "${BASE_BUILDER_REF}"
-
-          printf 'GCLOUD_PROJECT=%s\n' "${GCLOUD_PROJECT}" \
-              >> "${GITHUB_ENV}"
-
-          rm -f \
-              "${GCP_KEY_FILE}"
+          docker pull "${BASE_BUILDER_REF}"
 
       - name: Build corrected RPM builder image
         shell: bash
@@ -87,7 +80,6 @@ jobs:
           set -euo pipefail
 
           docker build \
-              --pull=false \
               --file .ci/Dockerfile.hydron-rpm \
               --tag "${BUILDER_REF}" \
               .ci
@@ -96,15 +88,12 @@ jobs:
               --entrypoint /bin/bash \
               "${BUILDER_REF}" \
               -lc '
-                  set -e
-
-                  grep "^baseurl=" \
-                      /etc/yum.repos.d/CentOS-Vault-7.5.repo
-
+                  set -euo pipefail
+                  grep "^baseurl=" /etc/yum.repos.d/CentOS-Vault-7.5.repo
                   command -v rpmsign
               '
 
-      - name: Prepare disposable RPM work tree
+      - name: Prepare RPM workspace
         shell: bash
         run: |
           set -euo pipefail
@@ -114,24 +103,22 @@ jobs:
           RPM_OUTPUT="${BUILD_ROOT}/output"
           SIGNING_DIR="${BUILD_ROOT}/signing"
           DIST_DIR="${GITHUB_WORKSPACE}/dist"
+          RPM_RELEASE="100.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
 
-          mkdir -p \
+          install -d \
               "${RPM_WORK}" \
               "${RPM_OUTPUT}" \
-              "${SIGNING_DIR}/gnupg" \
+              "${SIGNING_DIR}" \
               "${DIST_DIR}"
 
-          git archive "${GITHUB_SHA}" |
-              tar -x -C "${RPM_WORK}"
+          git archive "${GITHUB_SHA}" | tar -x -C "${RPM_WORK}"
 
-          mkdir -p \
+          install -d \
               "${RPM_WORK}/BUILD" \
               "${RPM_WORK}/BUILDROOT" \
               "${RPM_WORK}/RPMS" \
               "${RPM_WORK}/SOURCES" \
               "${RPM_WORK}/SRPMS"
-
-          RPM_RELEASE="100.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
 
           sed -i -E \
               "s/^[[:space:]]*Release:.*/Release: ${RPM_RELEASE}%{?dist}/" \
@@ -141,27 +128,13 @@ jobs:
               '^(Epoch|Name|Version|Release|Source)' \
               "${RPM_WORK}/SPECS/xo-lite.spec"
 
-          {
-              printf 'BUILD_ROOT=%s\n' "${BUILD_ROOT}"
-              printf 'RPM_WORK=%s\n' "${RPM_WORK}"
-              printf 'RPM_OUTPUT=%s\n' "${RPM_OUTPUT}"
-              printf 'SIGNING_DIR=%s\n' "${SIGNING_DIR}"
-              printf 'DIST_DIR=%s\n' "${DIST_DIR}"
-              printf 'RPM_RELEASE=%s\n' "${RPM_RELEASE}"
-          } >> "${GITHUB_ENV}"
-
-      - name: Correct bind-mount ownership
-        shell: bash
-        run: |
-          set -euo pipefail
-
           docker run --rm \
               --user root \
               -v "${RPM_WORK}:/mounted-work" \
               -v "${RPM_OUTPUT}:/mounted-output" \
               "${BUILDER_REF}" \
               bash --noprofile --norc -c '
-                  set -e
+                  set -euo pipefail
 
                   BUILDER_UID="$(id -u builder)"
                   BUILDER_GID="$(id -g builder)"
@@ -177,20 +150,28 @@ jobs:
                       /mounted-output
               '
 
+          {
+              printf 'BUILD_ROOT=%s\n' "${BUILD_ROOT}"
+              printf 'RPM_WORK=%s\n' "${RPM_WORK}"
+              printf 'RPM_OUTPUT=%s\n' "${RPM_OUTPUT}"
+              printf 'SIGNING_DIR=%s\n' "${SIGNING_DIR}"
+              printf 'DIST_DIR=%s\n' "${DIST_DIR}"
+              printf 'RPM_RELEASE=%s\n' "${RPM_RELEASE}"
+          } >> "${GITHUB_ENV}"
+
       - name: Build xo-lite RPM
         shell: bash
         run: |
           set -euo pipefail
 
-          chmod 0755 \
-              _xcp-ng-build-env/run.py
+          chmod 0755 _xcp-ng-build-env/run.py
 
           _xcp-ng-build-env/run.py \
               --rm \
               --fail-on-error \
               --name "xo_lite_${GITHUB_RUN_ID}" \
               --env "WS_RELEASE=${XO_RELEASE}" \
-              --branch 'hydron-poc-fixed' \
+              --branch hydron-poc-fixed \
               --disablerepo 'C7.5.1804-*' \
               --build-local "${RPM_WORK}" \
               --output-dir "${RPM_OUTPUT}"
@@ -198,169 +179,213 @@ jobs:
           mapfile -t BUILT_RPMS < <(
               find "${RPM_OUTPUT}/RPMS" \
                   -type f \
-                  -name 'xo-lite-*.rpm'
+                  -name 'xo-lite-*.rpm' \
+                  | sort
           )
 
           if [ "${#BUILT_RPMS[@]}" -ne 1 ]; then
-              echo "Expected exactly one xo-lite RPM." >&2
+              echo "Expected exactly one xo-lite RPM; found ${#BUILT_RPMS[@]}." >&2
               printf '%s\n' "${BUILT_RPMS[@]}" >&2
               exit 1
           fi
 
+          RPM_RELATIVE="${BUILT_RPMS[0]#"${RPM_OUTPUT}/"}"
+
+          printf 'RPM_RELATIVE=%s\n' "${RPM_RELATIVE}" \
+              >> "${GITHUB_ENV}"
+
           printf 'Built RPM: %s\n' "${BUILT_RPMS[0]}"
-
-      - name: Import RPM signing key
-        shell: bash
-        env:
-          RPM_GPG_PRIVATE_KEY_B64: ${{ secrets.RPM_GPG_PRIVATE_KEY_B64 }}
-        run: |
-          set -euo pipefail
-
-          test -n "${RPM_GPG_PRIVATE_KEY_B64}"
-
-          printf '%s' "${RPM_GPG_PRIVATE_KEY_B64}" |
-              base64 -d \
-              > "${SIGNING_DIR}/private-key.asc"
-
-          chmod 0600 \
-              "${SIGNING_DIR}/private-key.asc"
-
-          chmod 0700 \
-              "${SIGNING_DIR}/gnupg"
 
       - name: Sign and verify RPM
         shell: bash
+        env:
+          # Until this secret exists, the workflow creates a disposable POC key.
+          RPM_GPG_PRIVATE_KEY_B64: ${{ secrets.RPM_GPG_PRIVATE_KEY_B64 }}
+          RPM_GPG_EXPECTED_FINGERPRINT: ${{ vars.RPM_GPG_EXPECTED_FINGERPRINT }}
         run: |
           set -euo pipefail
 
-          docker run --rm \
+          PRIVATE_KEY_FILE="${SIGNING_DIR}/private-key.asc"
+
+          cleanup_private_key_file() {
+              rm -f "${PRIVATE_KEY_FILE}"
+          }
+          trap cleanup_private_key_file EXIT
+
+          if [ -n "${RPM_GPG_PRIVATE_KEY_B64}" ]; then
+              printf '%s' "${RPM_GPG_PRIVATE_KEY_B64}" \
+                  | base64 --decode \
+                  > "${PRIVATE_KEY_FILE}"
+
+              chmod 0600 "${PRIVATE_KEY_FILE}"
+          fi
+
+          docker run --rm -i \
               --user root \
+              --env "EXPECTED_FPR=${RPM_GPG_EXPECTED_FINGERPRINT}" \
+              --env "RPM_RELATIVE=${RPM_RELATIVE}" \
               -v "${SIGNING_DIR}:/signing" \
               -v "${RPM_OUTPUT}:/output" \
               "${BUILDER_REF}" \
               bash --noprofile --norc -s <<'IN_SIGNER'
           set -euo pipefail
 
-          chmod 0700 \
-              /signing/gnupg
+          KEY_HOME='/signing/gnupg'
+          PRIVATE_KEY='/signing/private-key.asc'
+          FINGERPRINT_FILE='/signing/key-fingerprint'
+          PUBLIC_KEY='/signing/RPM-GPG-KEY-xo-lite'
+          RPM_FILE="/output/${RPM_RELATIVE}"
 
-          gpg1 \
-              --homedir /signing/gnupg \
-              --batch \
-              --import /signing/private-key.asc
+          cleanup_private_material() {
+              rm -f \
+                  "${PRIVATE_KEY}" \
+                  /signing/generate-key.batch
+              rm -rf "${KEY_HOME}"
+          }
+          trap cleanup_private_material EXIT
+
+          install -d -m 0700 "${KEY_HOME}"
+          test -s "${RPM_FILE}"
+
+          if [ -s "${PRIVATE_KEY}" ]; then
+              KEY_SOURCE='github-secret'
+
+              gpg1 \
+                  --homedir "${KEY_HOME}" \
+                  --batch \
+                  --import "${PRIVATE_KEY}"
+          else
+              KEY_SOURCE='disposable-poc-key'
+
+              cat > /signing/generate-key.batch <<'KEY_CONFIG'
+          Key-Type: RSA
+          Key-Length: 3072
+          Name-Real: XO Lite RPM CI
+          Name-Email: xo-lite-rpm-ci@whitestack.com
+          Expire-Date: 30d
+          %no-protection
+          %commit
+          KEY_CONFIG
+
+              chmod 0600 /signing/generate-key.batch
+
+              gpg1 \
+                  --homedir "${KEY_HOME}" \
+                  --batch \
+                  --gen-key /signing/generate-key.batch
+          fi
 
           KEY_FPR="$(
               gpg1 \
-                  --homedir /signing/gnupg \
+                  --homedir "${KEY_HOME}" \
                   --with-colons \
                   --fingerprint \
-                  --list-secret-keys |
-              awk -F: '$1 == "fpr" { print $10; exit }'
+                  --list-secret-keys \
+              | awk -F: '$1 == "fpr" { print $10; exit }'
           )"
 
           test -n "${KEY_FPR}"
 
-          printf '%s\n' "${KEY_FPR}" \
-              > /signing/key-fingerprint
+          NORMALIZED_EXPECTED_FPR="$(
+              printf '%s' "${EXPECTED_FPR}" \
+                  | tr -d '[:space:]' \
+                  | tr '[:lower:]' '[:upper:]'
+          )"
+
+          if [ -n "${NORMALIZED_EXPECTED_FPR}" ] \
+              && [ "${KEY_FPR}" != "${NORMALIZED_EXPECTED_FPR}" ]; then
+              echo "Imported key fingerprint does not match RPM_GPG_EXPECTED_FINGERPRINT." >&2
+              exit 1
+          fi
+
+          printf '%s\n' "${KEY_FPR}" > "${FINGERPRINT_FILE}"
+          printf '%s\n' "${KEY_SOURCE}" > /signing/key-source
+
+          PUBLIC_KEY_TMP="${PUBLIC_KEY}.tmp"
 
           gpg1 \
-              --homedir /signing/gnupg \
+              --homedir "${KEY_HOME}" \
+              --batch \
               --armor \
               --export "${KEY_FPR}" \
-              > /signing/RPM-GPG-KEY-xo-lite
+              > "${PUBLIC_KEY_TMP}"
 
-          cat > /root/.rpmmacros <<EOF
+          test -s "${PUBLIC_KEY_TMP}"
+          grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' "${PUBLIC_KEY_TMP}"
+          mv -f "${PUBLIC_KEY_TMP}" "${PUBLIC_KEY}"
+
+          cat > /root/.rpmmacros <<RPM_MACROS
           %_signature gpg
           %_gpg_name ${KEY_FPR}
-          %_gpg_path /signing/gnupg
+          %_gpg_path ${KEY_HOME}
           %_gpgbin /usr/bin/gpg1
           %__gpg /usr/bin/gpg1
           %_gpg_digest_algo sha256
-          EOF
+          RPM_MACROS
 
-          while IFS= read -r -d '' RPM_FILE; do
-              printf 'Signing %s\n' "${RPM_FILE}"
-              rpmsign --addsign "${RPM_FILE}"
-          done < <(
-              find /output/RPMS \
-                  -type f \
-                  -name 'xo-lite-*.rpm' \
-                  -print0
-          )
+          rpmsign --addsign "${RPM_FILE}"
 
-          rpm --import \
-              /signing/RPM-GPG-KEY-xo-lite
-
-          while IFS= read -r -d '' RPM_FILE; do
-              printf 'Verifying %s\n' "${RPM_FILE}"
-              rpmkeys --checksig --verbose "${RPM_FILE}"
-          done < <(
-              find /output/RPMS \
-                  -type f \
-                  -name 'xo-lite-*.rpm' \
-                  -print0
-          )
+          rpm --import "${PUBLIC_KEY}"
+          rpmkeys --checksig --verbose "${RPM_FILE}"
 
           chmod 0644 \
-              /signing/key-fingerprint \
-              /signing/RPM-GPG-KEY-xo-lite
+              "${FINGERPRINT_FILE}" \
+              "${PUBLIC_KEY}" \
+              /signing/key-source
 
-          chmod -R a+rX \
-              /output
+          chmod a+r "${RPM_FILE}"
+
+          echo "Signed RPM: ${RPM_FILE}"
+          echo "Signing key: ${KEY_FPR} (${KEY_SOURCE})"
           IN_SIGNER
 
-          rm -f \
-              "${SIGNING_DIR}/private-key.asc"
+          test -s "${SIGNING_DIR}/key-fingerprint"
+          test -s "${SIGNING_DIR}/RPM-GPG-KEY-xo-lite"
+          test -s "${SIGNING_DIR}/key-source"
+
+          cleanup_private_key_file
+          trap - EXIT
 
       - name: Prepare publication bundle
         shell: bash
         run: |
           set -euo pipefail
 
-          mapfile -t RPMS < <(
-              find "${RPM_OUTPUT}/RPMS" \
-                  -type f \
-                  -name 'xo-lite-*.rpm'
-          )
-
-          if [ "${#RPMS[@]}" -ne 1 ]; then
-              echo "Expected exactly one signed RPM." >&2
-              exit 1
-          fi
-
-          RPM_FILE="${RPMS[0]}"
+          RPM_FILE="${RPM_OUTPUT}/${RPM_RELATIVE}"
           RPM_BASENAME="$(basename "${RPM_FILE}")"
+          PUBLIC_KEY="${SIGNING_DIR}/RPM-GPG-KEY-xo-lite"
+
+          test -s "${RPM_FILE}"
+          test -s "${PUBLIC_KEY}"
 
           install -m 0644 \
               "${RPM_FILE}" \
               "${DIST_DIR}/${RPM_BASENAME}"
 
           install -m 0644 \
-              "${SIGNING_DIR}/RPM-GPG-KEY-xo-lite" \
+              "${PUBLIC_KEY}" \
               "${DIST_DIR}/RPM-GPG-KEY-xo-lite"
 
           (
               cd "${DIST_DIR}"
 
-              sha256sum "${RPM_BASENAME}" \
-                  > SHA256SUMS
+              sha256sum "${RPM_BASENAME}" > SHA256SUMS
 
               {
                   printf 'RPM_FILE=%s\n' "${RPM_BASENAME}"
                   printf 'RPM_RELEASE=%s\n' "${RPM_RELEASE}"
                   printf 'GITHUB_SHA=%s\n' "${GITHUB_SHA}"
                   printf 'GITHUB_RUN_ID=%s\n' "${GITHUB_RUN_ID}"
-                  printf 'GITHUB_RUN_NUMBER=%s\n' \
-                      "${GITHUB_RUN_NUMBER}"
-                  printf 'GITHUB_RUN_ATTEMPT=%s\n' \
-                      "${GITHUB_RUN_ATTEMPT}"
+                  printf 'GITHUB_RUN_NUMBER=%s\n' "${GITHUB_RUN_NUMBER}"
+                  printf 'GITHUB_RUN_ATTEMPT=%s\n' "${GITHUB_RUN_ATTEMPT}"
+                  printf 'GPG_KEY_SOURCE=%s\n' "$(<"${SIGNING_DIR}/key-source")"
                   printf 'GPG_FINGERPRINT=%s\n' \
-                      "$(
-                          tr -d '[:space:]' \
-                              < "${SIGNING_DIR}/key-fingerprint"
-                      )"
+                      "$(tr -d '[:space:]' < "${SIGNING_DIR}/key-fingerprint")"
               } > manifest.env
           )
+
+          printf 'RPM_BASENAME=%s\n' "${RPM_BASENAME}" \
+              >> "${GITHUB_ENV}"
 
           find "${DIST_DIR}" \
               -maxdepth 1 \
@@ -383,8 +408,7 @@ jobs:
       - name: Upload signed RPM to Google Artifact Registry
         if: >-
           ${{
-            (github.event_name == 'workflow_dispatch' &&
-             inputs.publish_to_google == true) ||
+            (github.event_name == 'workflow_dispatch' && inputs.publish_to_google) ||
             startsWith(github.ref, 'refs/tags/rpm-hydron-')
           }}
         shell: bash
@@ -395,23 +419,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          : "${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}"
           : "${GCP_LOCATION:?GCP_LOCATION is required}"
           : "${GAR_YUM_REPOSITORY:?GAR_YUM_REPOSITORY is required}"
 
-          EFFECTIVE_PROJECT="${GCP_PROJECT_ID:-${GCLOUD_PROJECT}}"
-
-          mapfile -t RPMS < <(
-              find dist \
-                  -maxdepth 1 \
-                  -type f \
-                  -name 'xo-lite-*.rpm'
-          )
-
-          test "${#RPMS[@]}" -eq 1
-
           gcloud artifacts yum upload \
               "${GAR_YUM_REPOSITORY}" \
-              --project="${EFFECTIVE_PROJECT}" \
+              --project="${GCP_PROJECT_ID}" \
               --location="${GCP_LOCATION}" \
-              --source="${RPMS[0]}" \
+              --source="${DIST_DIR}/${RPM_BASENAME}" \
               --quiet

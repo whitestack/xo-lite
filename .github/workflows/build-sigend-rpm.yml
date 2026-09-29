@@ -7,7 +7,7 @@ on:
         description: Upload the signed RPM to Google Artifact Registry
         required: true
         type: boolean
-        default: false
+        default: true
 
   push:
     branches:

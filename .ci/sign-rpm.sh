@@ -7,9 +7,7 @@ set -euo pipefail
 
 KEY_HOME='/signing/gnupg'
 PRIVATE_KEY='/signing/private-key.asc'
-FINGERPRINT_FILE='/signing/key-fingerprint'
 PUBLIC_KEY='/signing/RPM-GPG-KEY-xo-lite'
-KEY_SOURCE_FILE='/signing/key-source'
 RPM_FILE="/output/${RPM_RELATIVE}"
 
 cleanup_private_material() {
@@ -19,10 +17,18 @@ cleanup_private_material() {
 
 trap cleanup_private_material EXIT
 
-test -s "${PRIVATE_KEY}"
-test -s "${RPM_FILE}"
+[ -s "${PRIVATE_KEY}" ] || {
+    echo "Missing private signing key" >&2
+    exit 1
+}
 
-install -d -m 0700 "${KEY_HOME}"
+[ -s "${RPM_FILE}" ] || {
+    echo "Missing RPM: ${RPM_FILE}" >&2
+    exit 1
+}
+
+mkdir -p "${KEY_HOME}"
+chmod 0700 "${KEY_HOME}"
 
 gpg1 \
     --homedir "${KEY_HOME}" \
@@ -38,20 +44,24 @@ KEY_FPR="$(
     awk -F: '$1 == "fpr" { print toupper($10); exit }'
 )"
 
-EXPECTED_FPR_NORMALIZED="$(
+NORMALIZED_EXPECTED_FPR="$(
     printf '%s' "${EXPECTED_FPR}" |
-    tr -d '[:space:]' |
-    tr '[:lower:]' '[:upper:]'
+        tr -d '[:space:]' |
+        tr '[:lower:]' '[:upper:]'
 )"
 
-test -n "${KEY_FPR}"
-
-if [ "${KEY_FPR}" != "${EXPECTED_FPR_NORMALIZED}" ]; then
-    echo "Signing key fingerprint does not match RPM_GPG_EXPECTED_FINGERPRINT." >&2
-    echo "Expected: ${EXPECTED_FPR_NORMALIZED}" >&2
+if [ "${KEY_FPR}" != "${NORMALIZED_EXPECTED_FPR}" ]; then
+    echo "Signing-key fingerprint mismatch." >&2
+    echo "Expected: ${NORMALIZED_EXPECTED_FPR}" >&2
     echo "Actual:   ${KEY_FPR}" >&2
     exit 1
 fi
+
+printf '%s\n' "${KEY_FPR}" \
+    > /signing/key-fingerprint
+
+printf '%s\n' 'github-secret' \
+    > /signing/key-source
 
 gpg1 \
     --homedir "${KEY_HOME}" \
@@ -60,27 +70,19 @@ gpg1 \
     --export "${KEY_FPR}" \
     > "${PUBLIC_KEY}"
 
-test -s "${PUBLIC_KEY}"
-grep -q \
-    '^-----BEGIN PGP PUBLIC KEY BLOCK-----$' \
-    "${PUBLIC_KEY}"
+sed \
+    -e "s|@@KEY_FINGERPRINT@@|${KEY_FPR}|g" \
+    -e "s|@@KEY_HOME@@|${KEY_HOME}|g" \
+    /ci/rpmmacros.tmpl \
+    > /root/.rpmmacros
 
-printf '%s\n' "${KEY_FPR}" > "${FINGERPRINT_FILE}"
-printf '%s\n' 'github-secret' > "${KEY_SOURCE_FILE}"
-
-cat > /root/.rpmmacros <<RPM_MACROS
-%_signature gpg
-%_gpg_name ${KEY_FPR}
-%_gpg_path ${KEY_HOME}
-%_gpgbin /usr/bin/gpg1
-%__gpg /usr/bin/gpg1
-%_gpg_digest_algo sha256
-RPM_MACROS
-
-rpmsign --addsign "${RPM_FILE}"
+rpmsign \
+    --addsign \
+    "${RPM_FILE}"
 
 RPM_DB='/tmp/xo-lite-rpmdb'
-install -d -m 0755 "${RPM_DB}"
+
+mkdir -p "${RPM_DB}"
 
 rpm \
     --dbpath "${RPM_DB}" \
@@ -97,9 +99,9 @@ rpmkeys \
     "${RPM_FILE}"
 
 chmod 0644 \
-    "${FINGERPRINT_FILE}" \
-    "${PUBLIC_KEY}" \
-    "${KEY_SOURCE_FILE}"
+    /signing/key-fingerprint \
+    /signing/key-source \
+    "${PUBLIC_KEY}"
 
 chmod a+r "${RPM_FILE}"
 

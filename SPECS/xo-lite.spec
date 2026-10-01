@@ -1,12 +1,8 @@
 %global ws_release %{getenv:WS_RELEASE}
 %undefine _disable_source_fetch
-%global source_name xo-lite
-%global source_directory xo-lite-%{ws_release}
-
-%undefine _disable_source_fetch
 
 Summary: Xen Orchestra Lite
-Name:    nephora-nc-lite
+Name:    xo-lite
 Epoch: 1
 Version: 0.15.0
 Release: 1%{?dist}
@@ -15,7 +11,7 @@ URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/whitestack/xo-lite/archive/refs/tags/%{ws_release}.tar.gz
+Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{ws_release}/%{name}_%{ws_release}.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen
@@ -23,7 +19,7 @@ Orchestra Appliance for single-host administration, running directly from your
 browser without having to deploy anything.
 
 %prep
-%autosetup -p1 -n %{source_directory}
+%autosetup -p1 -n xo-lite_hydron
 
 %install
 install -d -m 755 %{buildroot}/opt/xensource/www

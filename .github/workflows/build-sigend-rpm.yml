@@ -20,11 +20,11 @@ env:
 
 jobs:
   build-sign-publish:
-    name: Build and sign xo-lite RPM
+    name: Build and sign nc-lite RPM
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out xo-lite
+      - name: Check out nc-lite
         uses: actions/checkout@v5
         with:
           persist-credentials: false
@@ -137,7 +137,7 @@ jobs:
               printf 'RPM_RELEASE=%s\n' "${RPM_RELEASE}"
           } >> "${GITHUB_ENV}"
 
-      - name: Build xo-lite RPM
+      - name: Build nc-lite RPM
         shell: bash
         run: |
           set -euo pipefail
@@ -157,12 +157,12 @@ jobs:
           mapfile -t BUILT_RPMS < <(
               find "${RPM_OUTPUT}/RPMS" \
                   -type f \
-                  -name 'xo-lite-*.rpm' \
+                  -name 'nephora-nc-lite-*.rpm' \
                   | sort
           )
 
           if [ "${#BUILT_RPMS[@]}" -ne 1 ]; then
-              echo "Expected exactly one xo-lite RPM; found ${#BUILT_RPMS[@]}." >&2
+              echo "Expected exactly one nc-lite RPM; found ${#BUILT_RPMS[@]}." >&2
               printf '%s\n' "${BUILT_RPMS[@]}" >&2
               exit 1
           fi
@@ -266,7 +266,7 @@ jobs:
       - name: Save signed RPM as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xo-lite-rpm
+          name: nc-lite-rpm
           path: |
             dist/*.rpm
             dist/RPM-GPG-KEY-xo-lite

@@ -1,9 +1,10 @@
 %global ws_release %{getenv:WS_RELEASE}
+%global source_name xo-lite
 %undefine _disable_source_fetch
 
 Summary: Xen Orchestra Lite
-Name:    xo-lite
-Epoch: 1
+Name:    nephora-nc-lite
+Epoch:   1
 Version: 0.15.0
 Release: 1%{?dist}
 License: AGPL3-only
@@ -11,7 +12,7 @@ URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{ws_release}/%{name}_%{ws_release}.tar.gz
+Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{ws_release}/%{source_name}_%{ws_release}.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen

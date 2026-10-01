@@ -10,6 +10,7 @@ Version: 0.15.0
 Release: 1%{?dist}
 License: AGPL3-only
 URL:     https://github.com/whitestack/xen-orchestra
+Provides: xo-lite = %{epoch}:%{version}-%{release}
 
 BuildArch: noarch
 

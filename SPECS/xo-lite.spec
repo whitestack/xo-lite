@@ -2,7 +2,7 @@
 %undefine _disable_source_fetch
 
 Summary: Xen Orchestra Lite
-Name:    nephora-xo-lite
+Name:    nephora-nc-lite
 Epoch: 1
 Version: 0.15.0
 Release: 1%{?dist}
@@ -19,7 +19,7 @@ Orchestra Appliance for single-host administration, running directly from your
 browser without having to deploy anything.
 
 %prep
-%autosetup -p1 -n xo-lite_hydron
+%autosetup -p1 -n nephora-nc-lite_hydron
 
 %install
 install -d -m 755 %{buildroot}/opt/xensource/www

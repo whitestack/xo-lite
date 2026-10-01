@@ -16,7 +16,7 @@ env:
   BUILDER_REF: gcr.io/whitestack-private/nephora/xcp-ng-build-env:hydron-rpm-sign-v1
   BUILD_ENV_TAG: hydron-rpm-sign-v1
   BUILD_ENV_COMMIT: d6200a7ce87633bf1e3d7466601b248cf3b58bdd
-  XO_RELEASE: hydron
+  XO_RELEASE: "${GITHUB_REF_NAME##*/}"
 
 jobs:
   build-sign-publish:

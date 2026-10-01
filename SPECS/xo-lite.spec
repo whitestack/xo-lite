@@ -2,7 +2,7 @@
 %undefine _disable_source_fetch
 
 Summary: Xen Orchestra Lite
-Name:    xo-lite
+Name:    nephora-xo-lite
 Epoch: 1
 Version: 0.15.0
 Release: 1%{?dist}

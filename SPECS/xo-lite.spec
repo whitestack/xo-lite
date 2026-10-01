@@ -1,5 +1,6 @@
 %global ws_release %{getenv:WS_RELEASE}
 %global source_name xo-lite
+
 %undefine _disable_source_fetch
 
 Summary: Xen Orchestra Lite
@@ -12,7 +13,7 @@ URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/whitestack/xen-orchestra/releases/download/%{ws_release}/%{source_name}_%{ws_release}.tar.gz
+Source0: https://github.com/whitestack/xen-orchestra/releases/download/hydron/%{source_name}_hydron.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen

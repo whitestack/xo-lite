@@ -16,7 +16,6 @@ env:
   BUILDER_REF: gcr.io/whitestack-private/nephora/xcp-ng-build-env:hydron-rpm-sign-v1
   BUILD_ENV_TAG: hydron-rpm-sign-v1
   BUILD_ENV_COMMIT: d6200a7ce87633bf1e3d7466601b248cf3b58bdd
-  XO_RELEASE: "${GITHUB_REF_NAME##*/}"
 
 jobs:
   build-sign-publish:
@@ -24,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Set XO release
+        run: echo "XO_RELEASE=${GITHUB_REF_NAME##*/}" >> "${GITHUB_ENV}"
+
       - name: Check out nc-lite
         uses: actions/checkout@v5
         with:

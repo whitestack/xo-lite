@@ -1,7 +1,9 @@
 %global ws_release %{getenv:WS_RELEASE}
 %undefine _disable_source_fetch
 %global source_name xo-lite
-%global source_directory %{source_name}_%{ws_release}
+%global source_directory xo-lite-%{ws_release}
+
+%undefine _disable_source_fetch
 
 Summary: Xen Orchestra Lite
 Name:    nephora-nc-lite
@@ -13,7 +15,7 @@ URL:     https://github.com/whitestack/xen-orchestra
 
 BuildArch: noarch
 
-Source0: https://github.com/whitestack/xo-lite/releases/download/%{ws_release}/%{source_name}_%{ws_release}.tar.gz
+Source0: https://github.com/whitestack/xo-lite/archive/refs/tags/%{ws_release}.tar.gz
 
 %description
 This package contains Xen Orchestra Lite, a lightweight version of the Xen
